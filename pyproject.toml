@@ -4,6 +4,11 @@ pythonpath = ["app"]
 testpaths = ["app/tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# Deprecations raised inside the starlette/httpx versions pinned by the challenge, not by this code
+filterwarnings = [
+    "ignore::DeprecationWarning:starlette.testclient",
+    "ignore:The 'app' shortcut is now deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 120
