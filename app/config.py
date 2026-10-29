@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     notify_max_attempts: int = 3
     # First backoff between notify attempts; doubles each time, with jitter
     notify_backoff_s: float = 0.5
+    # Upper bound for a Retry-After sent by the provider
+    notify_max_retry_after_s: float = 30.0
     # Notifications in flight at once; the rate limiter, not this, sets the pace
     notify_concurrency: int = 10
 

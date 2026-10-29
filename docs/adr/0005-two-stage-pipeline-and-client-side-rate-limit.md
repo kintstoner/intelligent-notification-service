@@ -30,7 +30,7 @@ stuck behind the rate limit and extraction would stop.
   once; when it is full, the next call waits for the oldest one to leave the window. 45 instead of 50 leaves room for
   the variation between a call leaving the service and reaching the provider.
 - **Retries**: 429, 5xx and timeouts are retried with exponential backoff and full jitter (0.5 s, doubling), up to
-  `NOTIFY_MAX_ATTEMPTS` (3) attempts, each one through the limiter. `Retry-After` is honoured if the provider ever
+  `NOTIFY_MAX_ATTEMPTS` (3) attempts, each one through the limiter. `Retry-After` is honoured, capped at `NOTIFY_MAX_RETRY_AFTER_S` (30 s), if the provider ever
   sends it. Other 4xx are not retried (`provider_rejected`); exhausted retries end as `rate_limited` or
   `provider_error`.
 - **Backlog**: notifications wait for their turn and are delivered in order; none is dropped for being late. The

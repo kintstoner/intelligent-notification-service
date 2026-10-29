@@ -29,6 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         timeout_s=settings.notify_timeout_s,
         max_attempts=settings.notify_max_attempts,
         backoff_s=settings.notify_backoff_s,
+        max_retry_after_s=settings.notify_max_retry_after_s,
     )
     delivery = DeliveryQueue(notifier, concurrency=settings.notify_concurrency, max_size=settings.queue_max_size)
     processor = RequestProcessor(

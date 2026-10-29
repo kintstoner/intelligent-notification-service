@@ -41,6 +41,8 @@ class Extractor:
             raise ExtractionError(f"AI engine rejected the call: {response.status_code}", retryable=False)
 
         try:
-            return response.json()["choices"][0]["message"]["content"]
+            content = response.json()["choices"][0]["message"]["content"]
         except (ValueError, KeyError, IndexError, TypeError) as error:
             raise ExtractionError("AI engine response has no message content", retryable=False) from error
+        # Models can answer with null content (a filtered or empty completion): an empty answer, handled as a refusal
+        return content if isinstance(content, str) else ""

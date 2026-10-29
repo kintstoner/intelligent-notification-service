@@ -80,3 +80,12 @@ async def test_a_response_without_choices_is_not_retryable(extractor):
     with pytest.raises(ExtractionError) as error:
         await extractor.extract(USER_INPUT)
     assert error.value.retryable is False
+
+
+@respx.mock
+async def test_a_null_content_is_an_empty_answer(extractor):
+    respx.post(f"{BASE_URL}/v1/ai/extract").respond(
+        json={"choices": [{"message": {"role": "assistant", "content": None}}]}
+    )
+
+    assert await extractor.extract(USER_INPUT) == ""

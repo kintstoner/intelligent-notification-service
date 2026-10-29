@@ -83,6 +83,7 @@ class Notifier:
         timeout_s: float,
         max_attempts: int,
         backoff_s: float,
+        max_retry_after_s: float,
         sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._client = client
@@ -90,6 +91,7 @@ class Notifier:
         self._timeout_s = timeout_s
         self._max_attempts = max_attempts
         self._backoff_s = backoff_s
+        self._max_retry_after_s = max_retry_after_s
         self._sleep = sleep
 
     async def deliver(self, notification: Notification, request: NotificationRequest) -> None:
@@ -124,7 +126,8 @@ class Notifier:
     def _wait(self, state: RetryCallState) -> float:
         error = state.outcome.exception() if state.outcome else None
         if isinstance(error, _Retryable) and error.retry_after is not None:
-            return error.retry_after
+            # Honoured, but capped: a delivery worker must not sleep for whatever the provider asks
+            return min(error.retry_after, self._max_retry_after_s)
         # Full jitter within [base, 2 * base], base doubling per attempt: retries do not arrive in lockstep
         base = self._backoff_s * 2 ** (state.attempt_number - 1)
         return random.uniform(base, 2 * base)

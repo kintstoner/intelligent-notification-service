@@ -183,6 +183,7 @@ Variables de entorno (ver [.env.example](.env.example) y `app/config.py`):
 | `NOTIFY_WINDOW_S` | `10` | Duración de esa ventana, en segundos |
 | `NOTIFY_MAX_ATTEMPTS` | `3` | Intentos por notificación |
 | `NOTIFY_BACKOFF_S` | `0.5` | Primer backoff, que se dobla, con jitter |
+| `NOTIFY_MAX_RETRY_AFTER_S` | `30` | Tope para el `Retry-After` del proveedor |
 | `NOTIFY_CONCURRENCY` | `10` | Notificaciones en vuelo |
 | `NOTIFY_TIMEOUT_S` | `5` | Timeout por llamada de notificación |
 | `LOG_LEVEL` | `INFO` | Logs JSON con `request_id`, `reason` y número de intentos |

@@ -33,7 +33,7 @@ estarían bloqueados detrás del límite y la extracción se pararía.
   sale al momento; cuando está llena, la siguiente espera a que la más antigua salga de la ventana. 45 en vez de 50
   deja margen para la variación entre que una llamada sale del servicio y llega al proveedor.
 - **Reintentos**: 429, 5xx y timeouts se reintentan con backoff exponencial y jitter completo (0,5 s, doblando), hasta
-  `NOTIFY_MAX_ATTEMPTS` (3) intentos, cada uno pasando por el limitador. Se respeta `Retry-After` si el proveedor
+  `NOTIFY_MAX_ATTEMPTS` (3) intentos, cada uno pasando por el limitador. Se respeta `Retry-After`, con un tope de `NOTIFY_MAX_RETRY_AFTER_S` (30 s), si el proveedor
   llegara a enviarlo. Los demás 4xx no se reintentan (`provider_rejected`); agotados los reintentos se termina en
   `rate_limited` o `provider_error`.
 - **Backlog**: las notificaciones esperan su turno y se entregan en orden; ninguna se descarta por llegar tarde. La

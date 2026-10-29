@@ -96,7 +96,9 @@ def notifier(client, sleeps):
         return None
 
     limiter = type("NoLimit", (), {"acquire": staticmethod(no_wait)})()
-    return Notifier(client, limiter, timeout_s=1.0, max_attempts=3, backoff_s=0.5, sleep=record_sleep)
+    return Notifier(
+        client, limiter, timeout_s=1.0, max_attempts=3, backoff_s=0.5, max_retry_after_s=30.0, sleep=record_sleep
+    )
 
 
 def delivered():
@@ -168,6 +170,17 @@ async def test_backs_off_exponentially_between_attempts(notifier, sleeps):
     assert len(sleeps) == 2
     assert 0.5 <= sleeps[0] <= 1.0
     assert 1.0 <= sleeps[1] <= 2.0
+
+
+@respx.mock
+async def test_caps_a_retry_after_longer_than_the_configured_maximum(notifier, sleeps):
+    respx.post(f"{BASE_URL}/v1/notify").mock(
+        side_effect=[httpx.Response(429, headers={"Retry-After": "600"}), delivered()]
+    )
+
+    await notifier.deliver(NOTIFICATION, NotificationRequest(user_input="x"))
+
+    assert sleeps == [30.0]
 
 
 @respx.mock

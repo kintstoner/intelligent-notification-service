@@ -110,3 +110,9 @@ def test_output_cut_inside_a_value_cannot_be_repaired():
 def test_an_object_that_is_not_json_even_after_repairs_is_malformed():
     with pytest.raises(MalformedOutput):
         parse_ai_output('{"to" "a@b.com" "message"}')
+
+
+def test_an_empty_answer_is_a_refusal_worth_one_retry():
+    with pytest.raises(AIRefusal) as refusal:
+        parse_ai_output("")
+    assert refusal.value.kind == RefusalKind.POLICY
