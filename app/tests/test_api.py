@@ -84,3 +84,23 @@ def test_a_full_queue_still_answers_202_and_leaves_the_request_queued(client, fu
         "status": "queued",
         "reason": "queue_full",
     }
+
+
+def test_endpoints_run_on_the_event_loop():
+    """
+    Sync endpoints run in a thread pool: they would touch the asyncio queues and the lock-free repository from another
+    thread. Every endpoint must be async.
+    """
+    import inspect
+
+    from fastapi.routing import APIRoute
+
+    from main import app
+
+    sync_endpoints = [
+        route.path
+        for route in app.routes
+        if isinstance(route, APIRoute) and not inspect.iscoroutinefunction(route.endpoint)
+    ]
+
+    assert sync_endpoints == []

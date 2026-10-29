@@ -55,7 +55,7 @@ app.include_router(requests_router)
 
 
 @app.get("/health", tags=["operations"])
-def health() -> dict:
+async def health() -> dict:
     """Liveness plus the backlog of each stage: how many requests wait for the AI and how many for the provider."""
     return {
         "status": "ok",

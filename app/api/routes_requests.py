@@ -30,7 +30,7 @@ def _status_of(notification_request: NotificationRequest) -> StatusResponse:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=CreatedResponse)
-def create_request(body: CreateRequestBody, request: Request) -> CreatedResponse:
+async def create_request(body: CreateRequestBody, request: Request) -> CreatedResponse:
     notification_request = NotificationRequest(user_input=body.user_input)
     _repository(request).add(notification_request)
     return CreatedResponse(id=notification_request.id)
@@ -42,7 +42,7 @@ def create_request(body: CreateRequestBody, request: Request) -> CreatedResponse
     response_model=StatusResponse,
     response_model_exclude_none=True,
 )
-def process_request(request_id: str, request: Request) -> StatusResponse:
+async def process_request(request_id: str, request: Request) -> StatusResponse:
     """
     Accepts the request for processing and returns at once. Idempotent: a request already in the queue, being
     processed or finished is not enqueued again. A full queue is never an error for the caller: the request stays
@@ -59,5 +59,5 @@ def process_request(request_id: str, request: Request) -> StatusResponse:
 
 
 @router.get("/{request_id}", response_model=StatusResponse, response_model_exclude_none=True)
-def get_request(request_id: str, request: Request) -> StatusResponse:
+async def get_request(request_id: str, request: Request) -> StatusResponse:
     return _status_of(_find(request, request_id))
