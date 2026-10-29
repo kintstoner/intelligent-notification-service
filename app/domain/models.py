@@ -1,6 +1,11 @@
 import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Literal, Self
+
+from pydantic import BaseModel, field_validator, model_validator
+
+from domain.contacts import is_email, is_phone, normalise_phone
 
 
 class Status(StrEnum):
@@ -19,3 +24,29 @@ class NotificationRequest:
     reason: str | None = None
     # Set once the request is in the processing queue, so processing it again does not enqueue it twice
     enqueued: bool = False
+
+
+class Notification(BaseModel):
+    """What is sent to the provider. Built only from a validated extraction."""
+
+    to: str
+    message: str
+    type: Literal["email", "sms"]
+
+    @field_validator("to", "message")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def recipient_matches_type(self) -> Self:
+        if self.type == "email" and not is_email(self.to):
+            raise ValueError("an email notification needs an email address")
+        if self.type == "sms":
+            if not is_phone(self.to):
+                raise ValueError("an sms notification needs a phone number")
+            self.to = normalise_phone(self.to)
+        return self
