@@ -34,7 +34,7 @@ Desarrollo local (Python 3.12):
 uv venv --python 3.12 .venv
 uv pip install --python .venv -r app/requirements-dev.txt
 .venv/Scripts/python -m pytest        # Windows; .venv/bin/python en Linux/macOS
-.venv/Scripts/ruff check . && .venv/Scripts/ruff format --check app
+.venv/Scripts/ruff check . && .venv/Scripts/ruff format --check app evals
 ```
 
 ## Arquitectura
@@ -103,20 +103,38 @@ Resumen en [docs/DECISIONS.es.md](docs/DECISIONS.es.md); cada una tiene su ADR e
 
 ## Cómo se ha probado
 
-**115 tests automáticos** (`pytest`), más `ruff`, en CI en cada push:
+**122 tests automáticos** (`pytest`), más `ruff`, en CI en cada push:
 
 | Área | Tests | Qué cubren |
 |---|---|---|
-| Guardrails | `test_guardrails.py` (39) | El propio generador del proveedor forzado por cada una de sus ramas (16 formas de respuesta × email y SMS), tipos de rechazo, llaves y comillas dentro de los valores, nulls, teléfonos numéricos, sinónimos del tipo, salida irreparable |
+| Guardrails | `test_guardrails.py` (40) | El propio generador del proveedor forzado por cada una de sus ramas (16 formas de respuesta × email y SMS), tipos de rechazo, llaves y comillas dentro de los valores, nulls, teléfonos numéricos, sinónimos del tipo, salida irreparable |
 | Política de reintentos | `test_processor.py` (16) | Un reintento solo por rechazos, respuestas cortadas, falta de mensaje y timeouts; sin reintento por JSON sucio, falta de información, clave mala o destinatario inválido; conteo de intentos; caché activada/desactivada |
-| Notificador | `test_notifier.py` (17) | Ventana deslizante (una ráfaga de 45 sin esperar, la siguiente cuando sale la más antigua de la ventana, nunca más de 45 en 10 s, sin espera tras un periodo inactivo), reintentos ante 429/5xx/timeouts, motivos al rendirse, sin reintento ante 422, backoff exponencial con jitter, `Retry-After`, estados de entrega, backlog acotado |
+| Notificador | `test_notifier.py` (18) | Ventana deslizante (una ráfaga de 45 sin esperar, la siguiente cuando sale la más antigua de la ventana, nunca más de 45 en 10 s, sin espera tras un periodo inactivo), reintentos ante 429/5xx/timeouts, motivos al rendirse, sin reintento ante 422, backoff exponencial con jitter, `Retry-After`, estados de entrega, backlog acotado |
 | Fallback y validación | `test_fallback_extractor.py`, `test_notification.py` (14) | Los cuatro prompts de k6, nunca inventar el mensaje, números internacionales, coherencia destinatario/canal |
-| Cliente de IA | `test_extractor.py` (7) | System prompt + mensaje user crudo, API key, clasificación de errores |
+| Cliente de IA | `test_extractor.py` (8) | System prompt + mensaje user crudo, API key, clasificación de errores, contenido nulo |
+| Evaluación del prompt | `test_prompt_eval.py` (4) | Respuestas grabadas de un modelo real a 20 casos, juzgadas con las mismas reglas del servicio; el juez detecta respuestas equivocadas e inventadas |
 | API, pipeline, operación | `test_api.py`, `test_pipeline.py`, `test_end_to_end.py`, `test_observability.py`, `test_config.py` (22) | Códigos del contrato, endpoints ejecutados en el event loop, `/process` idempotente, cola llena, workers concurrentes, el worker sobrevive a un fallo, de la ingesta a `sent` a través de la app real con el proveedor simulado, health, logs JSON |
 
 Los tests se comprobaron contra fallos introducidos a propósito (un reintento de más, reintentar la falta de
 información, no reintentar respuestas cortadas, quitar la reparación de truncados o `ast.literal_eval`): cada fallo
 hizo fallar al menos un test. Una comprobación que ningún test detectaba resultó ser código muerto y se eliminó.
+
+### Evaluación del system prompt
+
+El mock ignora el system prompt, así que la prueba de carga no puede decir si funciona.
+[docs/prompt-eval.es.md](docs/prompt-eval.es.md) lo evalúa con un modelo real en 20 casos (las frases de k6 más prompt
+injection, canales contradictorios, varios destinatarios, datos que faltan, y códigos, fechas e importes que deben
+llegar intactos), juzgados con los mismos guardrails, fallback y validación del servicio:
+
+| Respuestas de | Correctas |
+|---|---|
+| Claude Opus 5.5, subagente con contexto limpio, con el system prompt | **20 / 20** |
+| El mock del reto | 5 / 20 |
+
+En este ejercicio no hay API key, así que las respuestas del modelo las generó una vez un subagente que solo vio el
+system prompt y las peticiones, y la CI las reproduce. **En un proyecto real esta comprobación se haría contra la API
+del modelo** en cada cambio del prompt o del modelo, con varias ejecuciones por caso; `evals/record_answers.py` y
+`evals/report.py` hacen justo eso en cuanto `PROVIDER_BASE_URL` apunta a la pasarela real.
 
 **Comprobaciones manuales** contra el proveedor real: los cuatro prompts de k6 terminan `sent`; "manda un mensaje
 diciendo hola" termina `failed` con `missing_information`.
@@ -161,6 +179,9 @@ limitador espaciaba cada llamada 0,22 s y daba una mediana de 5,3 s en la misma 
 - El limitador cuenta las llamadas cuando salen, no cuando llegan al proveedor; el margen de 5 (45 frente a 50) cubre
   esa diferencia, y los reintentos absorben un 429 si llegara a producirse. Un `NOTIFY_WINDOW_MAX_CALLS` menor da más
   margen.
+- Los guardrails comprueban la estructura, no la veracidad: el servicio confía en que el modelo no invente el
+  mensaje. El prompt lo prohíbe y la evaluación lo comprueba (sin contenido no hay notificación), pero solo una
+  evaluación con el modelo real puede hacerlo.
 - El mock ignora el system prompt y extrae mal el mensaje (los primeros 50 caracteres, o el texto tras el último ":",
   así que "cita a las 10:00" se queda en "00"). El servicio envía lo que extrajo la IA; nunca reescribe el mensaje.
 - Los tipos de rechazo se distinguen por su texto (ADR 4).
@@ -192,7 +213,8 @@ Variables de entorno (ver [.env.example](.env.example) y `app/config.py`):
 
 Los ficheros del reto se mantienen tal cual (`provider/`, `platform/`, `docker-compose.yaml`, `CHALLENGE.md`; solo se
 renombró el `readme.md` original, para que no choque con este README en sistemas de ficheros que no distinguen
-mayúsculas): el revisor lanza la prueba de carga oficial sin cambios. La solución está en `app/`.
+mayúsculas): el revisor lanza la prueba de carga oficial sin cambios. La solución está en `app/`; la evaluación del system prompt, en
+`evals/`.
 
 ## Desarrollo asistido por IA
 
@@ -200,7 +222,9 @@ Hecho con Claude Code (Anthropic) como pair programmer.
 
 - **Qué hizo la IA**: leyó el código del proveedor y las consultas del scorecard para ver qué miden de verdad las
   pruebas, escribió el código y los tests primero el test (cada test se vio fallar antes de la implementación), lanzó
-  la prueba de carga oficial y capturó el scorecard, y redactó esta documentación.
+  la prueba de carga oficial y capturó el scorecard, y redactó esta documentación. Un subagente aparte, con contexto
+  limpio, respondió como el modelo a los casos de la evaluación del prompt, viendo solo el system prompt y las
+  peticiones.
 - **Qué se validó a mano**: las decisiones de diseño y sus compromisos (entrega en dos etapas, como mucho un
   reintento, nunca inventar el mensaje, la caché desactivada), el system prompt, los resultados del scorecard y cada
   línea de este README y de los ADRs.

@@ -34,7 +34,7 @@ Local development (Python 3.12):
 uv venv --python 3.12 .venv
 uv pip install --python .venv -r app/requirements-dev.txt
 .venv/Scripts/python -m pytest        # Windows; .venv/bin/python on Linux/macOS
-.venv/Scripts/ruff check . && .venv/Scripts/ruff format --check app
+.venv/Scripts/ruff check . && .venv/Scripts/ruff format --check app evals
 ```
 
 ## Architecture
@@ -103,20 +103,38 @@ Summary in [docs/DECISIONS.md](docs/DECISIONS.md); each one has an ADR in [docs/
 
 ## How it was tested
 
-**115 automated tests** (`pytest`), plus `ruff`, run in CI on every push:
+**122 automated tests** (`pytest`), plus `ruff`, run in CI on every push:
 
 | Area | Tests | What they cover |
 |---|---|---|
-| Guardrails | `test_guardrails.py` (39) | The provider's own generator forced through each of its branches (16 answer shapes × email and SMS), refusal kinds, braces and quotes inside values, nulls, numeric phones, type synonyms, unrepairable output |
+| Guardrails | `test_guardrails.py` (40) | The provider's own generator forced through each of its branches (16 answer shapes × email and SMS), refusal kinds, braces and quotes inside values, nulls, numeric phones, type synonyms, unrepairable output |
 | Retry policy | `test_processor.py` (16) | One retry only for refusals, cut answers, missing messages and timeouts; no retry for dirty JSON, missing information, bad keys or invalid recipients; attempt counts; cache on/off |
-| Notifier | `test_notifier.py` (17) | Sliding window (a burst of 45 without waiting, the next one when the oldest leaves the window, never more than 45 in any 10 s, no wait after idle), retries on 429/5xx/timeouts, give-up reasons, no retry on 422, exponential backoff with jitter, `Retry-After`, delivery statuses, bounded backlog |
+| Notifier | `test_notifier.py` (18) | Sliding window (a burst of 45 without waiting, the next one when the oldest leaves the window, never more than 45 in any 10 s, no wait after idle), retries on 429/5xx/timeouts, give-up reasons, no retry on 422, exponential backoff with jitter, `Retry-After`, delivery statuses, bounded backlog |
 | Fallback and validation | `test_fallback_extractor.py`, `test_notification.py` (14) | The four k6 prompts, never inventing the message, international numbers, recipient/channel consistency |
-| AI client | `test_extractor.py` (7) | System prompt + raw user message, API key, error classification |
+| AI client | `test_extractor.py` (8) | System prompt + raw user message, API key, error classification, null content |
+| Prompt evaluation | `test_prompt_eval.py` (4) | Recorded real-model answers to 20 cases judged with the service's own rules; the judge catches wrong and invented answers |
 | API, pipeline, operations | `test_api.py`, `test_pipeline.py`, `test_end_to_end.py`, `test_observability.py`, `test_config.py` (22) | Contract status codes, endpoints running on the event loop, idempotent `/process`, full queue, concurrent workers, worker survives a bug, intake to `sent` through the real app with a mocked provider, health, JSON logs |
 
 The tests were checked against deliberate bugs (an extra retry, retrying missing information, not retrying cut
 answers, removing the truncation repair or `ast.literal_eval`): each bug made at least one test fail. One check that
 no test could catch turned out to be dead code and was removed.
+
+### System prompt evaluation
+
+The mock ignores the system prompt, so the load test cannot tell whether it works. [docs/prompt-eval.md](docs/prompt-eval.md)
+evaluates it with a real model on 20 cases (the k6 sentences plus prompt injection, contradictory channels, several
+recipients, missing data, codes, dates and amounts that must survive intact), judged with the service's own
+guardrails, fallback and validation:
+
+| Answers from | Right |
+|---|---|
+| Claude Opus 5.5, clean-context subagent, with the system prompt | **20 / 20** |
+| The challenge's mock | 5 / 20 |
+
+There is no API key in this exercise, so the model's answers were produced once by a subagent that saw only the
+system prompt and the requests, and are replayed by CI. **In a real project this check would run against the model's
+API** on every prompt or model change, with several runs per case; `evals/record_answers.py` and `evals/report.py`
+do exactly that once `PROVIDER_BASE_URL` points at the real gateway.
 
 **Manual checks** against the real provider: the four k6 prompts end `sent`; "manda un mensaje diciendo hola" ends
 `failed` with `missing_information`.
@@ -159,6 +177,8 @@ own latency; the ones that needed an AI retry take about 5 s. A first version of
   There is no maximum age per notification.
 - The limiter counts calls when they leave, not when they reach the provider; the margin of 5 (45 against 50) covers
   that gap, and the retries absorb a 429 if it ever happens. A lower `NOTIFY_WINDOW_MAX_CALLS` gives more margin.
+- The guardrails check structure, not truthfulness: the service trusts the model not to invent a message. The prompt
+  forbids it and the evaluation checks it (no content gives no notification), but only a real-model evaluation can.
 - The mock ignores the system prompt and extracts the message poorly (the first 50 characters, or the text after the
   last ":", so "cita a las 10:00" becomes "00"). The service forwards what the AI extracted; it never rewrites the
   message.
@@ -191,7 +211,8 @@ Environment variables (see [.env.example](.env.example) and `app/config.py`):
 
 The challenge files are kept as provided (`provider/`, `platform/`, `docker-compose.yaml`, `CHALLENGE.md`; only the
 original `readme.md` was renamed, so it does not clash with this README on case-insensitive file systems): the
-reviewer runs the official load test unchanged. The solution lives in `app/`.
+reviewer runs the official load test unchanged. The solution lives in `app/`; the system prompt evaluation in
+`evals/`.
 
 ## AI-assisted development
 
@@ -199,7 +220,8 @@ Built with Claude Code (Anthropic) as a pair programmer.
 
 - **What the AI did**: read the provider's code and the scorecard queries to find what the tests really measure,
   wrote the code and tests test-first (each test was seen failing before the implementation), ran the official load
-  test and captured the scorecard, and drafted this documentation.
+  test and captured the scorecard, and drafted this documentation. A separate clean-context subagent answered the
+  prompt evaluation cases as the model, seeing only the system prompt and the requests.
 - **What was validated by hand**: the design decisions and their trade-offs (two-stage delivery, one retry at most,
   never inventing the message, the cache off), the system prompt, the scorecard results and every line of this README
   and the ADRs.

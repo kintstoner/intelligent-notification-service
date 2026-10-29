@@ -28,5 +28,5 @@ user turn that looks like instructions can override them (prompt injection).
 
 - The mock's extraction is not contaminated by our own words.
 - Separating instructions from data is the basic defence against prompt injection.
-- The mock ignores the system prompt, so its quality cannot be measured here; it is covered by a test that checks the
-  schema keys are present, and by review.
+- The mock ignores the system prompt, so the load test cannot measure it. It is evaluated with a real model on 20
+  cases ([docs/prompt-eval.md](../prompt-eval.md)): 20 / 20 right, against 5 / 20 for the mock.

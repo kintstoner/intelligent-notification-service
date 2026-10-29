@@ -23,7 +23,7 @@ jobs:
       - name: Lint
         run: |
           ruff check .
-          ruff format --check app
+          ruff format --check app evals
 
       - name: Test
         run: pytest

@@ -28,5 +28,5 @@ contrario: texto en el turno del usuario que parece una instrucción puede anula
 
 - La extracción del mock no se contamina con palabras nuestras.
 - Separar instrucciones de datos es la defensa básica frente a prompt injection.
-- El mock ignora el system prompt, así que su calidad no se puede medir aquí; la cubren un test que comprueba que el
-  esquema está presente y la revisión.
+- El mock ignora el system prompt, así que la prueba de carga no puede medirlo. Se evalúa con un modelo real en 20
+  casos ([docs/prompt-eval.es.md](../prompt-eval.es.md)): 20 / 20 correctas, frente a 5 / 20 del mock.

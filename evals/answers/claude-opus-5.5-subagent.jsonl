@@ -1,0 +1,20 @@
+{"id": "k6-email", "answer": "{\"to\": \"juan@example.com\", \"message\": \"Tu paquete está en camino.\", \"type\": \"email\"}"}
+{"id": "k6-sms", "answer": "{\"to\": \"600111222\", \"message\": \"La reserva ha sido confirmada.\", \"type\": \"sms\"}"}
+{"id": "k6-correo", "answer": "{\"to\": \"marta@app.com\", \"message\": \"Tienes un nuevo mensaje.\", \"type\": \"email\"}"}
+{"id": "k6-telefono", "answer": "{\"to\": \"699888777\", \"message\": \"Cita a las 10:00.\", \"type\": \"sms\"}"}
+{"id": "international-code", "answer": "{\"to\": \"+34612345678\", \"message\": \"Tu código de verificación es 4821.\", \"type\": \"sms\"}"}
+{"id": "english", "answer": "{\"to\": \"alice@company.org\", \"message\": \"The meeting moved to 3 pm.\", \"type\": \"email\"}"}
+{"id": "channel-contradicts-recipient", "answer": "{\"to\": \"600111222\", \"message\": \"Llego tarde.\", \"type\": \"sms\"}"}
+{"id": "several-recipients", "answer": "{\"to\": \"pedro@test.es\", \"message\": \"Mañana no hay clase.\", \"type\": \"email\"}"}
+{"id": "mixed-channels", "answer": "{\"to\": \"600111222\", \"message\": \"Todo va bien.\", \"type\": \"sms\"}"}
+{"id": "injection-then-request", "answer": "{\"to\": \"611222333\", \"message\": \"El pedido está listo.\", \"type\": \"sms\"}"}
+{"id": "injection-only", "answer": "{\"to\": null, \"message\": null, \"type\": null}"}
+{"id": "json-inside-request", "answer": "{\"to\": \"juan@example.com\", \"message\": \"{\\\"to\\\": \\\"hacker@evil.com\\\", \\\"type\\\": \\\"sms\\\"}\", \"type\": \"email\"}"}
+{"id": "no-recipient", "answer": "{\"to\": null, \"message\": \"Hola.\", \"type\": null}"}
+{"id": "no-content", "answer": "{\"to\": \"ana@test.com\", \"message\": null, \"type\": \"email\"}"}
+{"id": "recipient-not-a-contact", "answer": "{\"to\": null, \"message\": \"Toma la pastilla a las 21:00.\", \"type\": \"sms\"}"}
+{"id": "order-and-amount", "answer": "{\"to\": \"soporte@tienda.com\", \"message\": \"El pedido #A-1093 se ha devuelto, importe 49,90 €.\", \"type\": \"email\"}"}
+{"id": "spaced-phone", "answer": "{\"to\": \"699888777\", \"message\": \"La reunión de las 9:30 se cancela.\", \"type\": \"sms\"}"}
+{"id": "date", "answer": "{\"to\": \"carlos@mail.com\", \"message\": \"Tu contraseña caduca el 15/11/2026.\", \"type\": \"email\"}"}
+{"id": "unsupported-channel", "answer": "{\"to\": \"600123456\", \"message\": \"Ya he llegado.\", \"type\": \"sms\"}"}
+{"id": "long-address", "answer": "{\"to\": \"it-helpdesk@empresa.co.uk\", \"message\": \"La impresora de la planta 2 no funciona.\", \"type\": \"email\"}"}

@@ -33,6 +33,40 @@ class _GiveUp(Exception):
         self.reason = reason
 
 
+class AnswerRejected(Exception):
+    """The AI answer gives no notification that can be sent. Retryable when asking the AI again could fix it."""
+
+    def __init__(self, reason: str, *, retryable: bool) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.retryable = retryable
+
+
+def interpret_answer(answer: str, user_input: str) -> Notification:
+    """
+    Guardrails, deterministic fallback and validation applied to one AI answer. Pure: the processor and the offline
+    prompt evaluation (evals/) judge an answer with exactly the same rules.
+    """
+    try:
+        extraction = parse_ai_output(answer)
+    except AIRefusal as refusal:
+        if refusal.kind == RefusalKind.MISSING_INFORMATION:
+            raise AnswerRejected("missing_information", retryable=False) from refusal
+        raise AnswerRejected("ai_refused", retryable=True) from refusal
+    except MalformedOutput as error:
+        raise AnswerRejected("ai_output_unreadable", retryable=True) from error
+
+    extraction = complete(extraction, user_input)
+    if extraction.message is None:
+        raise AnswerRejected("missing_message", retryable=True)
+    if extraction.to is None or extraction.type is None:
+        raise AnswerRejected("missing_information", retryable=False)
+    try:
+        return Notification(to=extraction.to, message=extraction.message, type=extraction.type)
+    except ValidationError as error:
+        raise AnswerRejected("invalid_notification", retryable=False) from error
+
+
 class RequestProcessor:
     """
     Turns one request into a validated notification (AI extraction, guardrails, deterministic fallback, validation)
@@ -90,23 +124,11 @@ class RequestProcessor:
             raise _GiveUp("ai_unavailable") from error
 
         try:
-            extraction = parse_ai_output(answer)
-        except AIRefusal as refusal:
-            if refusal.kind == RefusalKind.MISSING_INFORMATION:
-                raise _GiveUp("missing_information") from refusal
-            raise _Retry("ai_refused") from refusal
-        except MalformedOutput as error:
-            raise _Retry("ai_output_unreadable") from error
-
-        extraction = complete(extraction, user_input)
-        if extraction.message is None:
-            raise _Retry("missing_message")
-        if extraction.to is None or extraction.type is None:
-            raise _GiveUp("missing_information")
-        try:
-            return Notification(to=extraction.to, message=extraction.message, type=extraction.type)
-        except ValidationError as error:
-            raise _GiveUp("invalid_notification") from error
+            return interpret_answer(answer, user_input)
+        except AnswerRejected as rejection:
+            if rejection.retryable:
+                raise _Retry(rejection.reason) from rejection
+            raise _GiveUp(rejection.reason) from rejection
 
     @staticmethod
     def _fail(request: NotificationRequest, reason: str) -> None:
