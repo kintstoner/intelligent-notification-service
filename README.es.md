@@ -1,6 +1,6 @@
-# Intelligent Notification Service
+# intelligent-notification-service
 
-[English](README.md)
+[English](README.md) · [![CI](https://github.com/kintstoner/intelligent-notification-service/actions/workflows/ci.yml/badge.svg)](https://github.com/kintstoner/intelligent-notification-service/actions/workflows/ci.yml)
 
 Servicio FastAPI que convierte una petición en lenguaje natural ("Manda un email a ana@test.com diciendo hola") en una
 notificación: un motor de IA extrae `{to, message, type}`, unos guardrails limpian y validan su respuesta y el
@@ -228,5 +228,10 @@ Hecho con Claude Code (Anthropic) como pair programmer.
 - **Qué se validó a mano**: las decisiones de diseño y sus compromisos (entrega en dos etapas, como mucho un
   reintento, nunca inventar el mensaje, la caché desactivada), el system prompt, los resultados del scorecard y cada
   línea de este README y de los ADRs.
+- **Encontrado probándolo a mano**: 30 peticiones enviadas a la vez desde el navegador tardaban una mediana de
+  5,3 s, porque el primer limitador espaciaba cada envío 0,22 s. Se sustituyó por una ventana deslizante que replica
+  la regla del proveedor (mediana de 2,8 s, [ADR 5](docs/adr/0005-two-stage-pipeline-and-client-side-rate-limit.es.md)).
+  La revisión de la primera versión llevó además a evaluar el prompt con un modelo real
+  ([docs/prompt-eval.es.md](docs/prompt-eval.es.md)).
 - **Guardarraíles**: la batería de tests automáticos (dirigida por el propio generador de respuestas del proveedor),
   las comprobaciones con fallos introducidos a propósito, `ruff`, CI en cada push y la prueba k6 oficial.
