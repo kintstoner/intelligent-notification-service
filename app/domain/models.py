@@ -24,6 +24,8 @@ class NotificationRequest:
     reason: str | None = None
     # Set once the request is in the processing queue, so processing it again does not enqueue it twice
     enqueued: bool = False
+    ai_attempts: int = 0
+    notify_attempts: int = 0
 
 
 class Notification(BaseModel):
