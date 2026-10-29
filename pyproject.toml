@@ -19,3 +19,7 @@ extend-exclude = ["provider"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests poll observable state on purpose instead of reaching into the code for an event
+"app/tests/*" = ["ASYNC110"]

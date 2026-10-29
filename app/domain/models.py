@@ -17,3 +17,5 @@ class NotificationRequest:
     status: Status = Status.QUEUED
     # Why a request failed, or why it is still waiting; shown in the status response
     reason: str | None = None
+    # Set once the request is in the processing queue, so processing it again does not enqueue it twice
+    enqueued: bool = False
