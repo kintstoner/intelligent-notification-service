@@ -68,7 +68,13 @@ class RequestProcessor:
                 notification = await self._attempt(request.user_input)
             except _Retry as retry:
                 reason = retry.reason
-                logger.info("Request %s: AI attempt %d failed (%s)", request.id, request.ai_attempts, reason)
+                logger.info(
+                    "Request %s: AI attempt %d failed (%s)",
+                    request.id,
+                    request.ai_attempts,
+                    reason,
+                    extra={"request_id": request.id, "reason": reason, "ai_attempts": request.ai_attempts},
+                )
                 continue
             if self._cache is not None:
                 self._cache[request.user_input] = notification
@@ -106,4 +112,9 @@ class RequestProcessor:
     def _fail(request: NotificationRequest, reason: str) -> None:
         request.status = Status.FAILED
         request.reason = reason
-        logger.warning("Request %s failed: %s (%d AI attempts)", request.id, reason, request.ai_attempts)
+        logger.warning(
+            "Request %s failed: %s",
+            request.id,
+            reason,
+            extra={"request_id": request.id, "reason": reason, "ai_attempts": request.ai_attempts},
+        )

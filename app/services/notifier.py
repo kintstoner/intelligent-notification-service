@@ -148,6 +148,10 @@ class DeliveryQueue:
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks = []
 
+    @property
+    def backlog(self) -> int:
+        return self._queue.qsize()
+
     def submit(self, notification: Notification, request: NotificationRequest) -> None:
         try:
             self._queue.put_nowait((notification, request))
@@ -162,17 +166,21 @@ class DeliveryQueue:
             except NotificationFailed as failure:
                 _fail(request, failure.reason)
             except Exception:
-                logger.exception("Unexpected error delivering request %s", request.id)
+                logger.exception("Unexpected error delivering request %s", request.id, extra={"request_id": request.id})
                 _fail(request, "internal_error")
             else:
                 request.status = Status.SENT
                 request.reason = None
                 logger.info(
-                    "Request %s sent by %s after %d AI and %d notify attempts",
+                    "Request %s sent by %s",
                     request.id,
                     notification.type,
-                    request.ai_attempts,
-                    request.notify_attempts,
+                    extra={
+                        "request_id": request.id,
+                        "type": notification.type,
+                        "ai_attempts": request.ai_attempts,
+                        "notify_attempts": request.notify_attempts,
+                    },
                 )
             finally:
                 self._queue.task_done()
@@ -181,4 +189,9 @@ class DeliveryQueue:
 def _fail(request: NotificationRequest, reason: str) -> None:
     request.status = Status.FAILED
     request.reason = reason
-    logger.warning("Request %s failed: %s (%d notify attempts)", request.id, reason, request.notify_attempts)
+    logger.warning(
+        "Request %s failed: %s",
+        request.id,
+        reason,
+        extra={"request_id": request.id, "reason": reason, "notify_attempts": request.notify_attempts},
+    )

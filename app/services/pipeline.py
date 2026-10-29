@@ -30,6 +30,10 @@ class Pipeline:
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks = []
 
+    @property
+    def backlog(self) -> int:
+        return self._queue.qsize()
+
     def submit(self, request: NotificationRequest) -> bool:
         """Enqueues the request; False if the queue is full."""
         try:
@@ -46,7 +50,7 @@ class Pipeline:
                 await self.handler(request)
             except Exception:
                 # A bug in one request must not take the worker down with it
-                logger.exception("Unexpected error processing request %s", request.id)
+                logger.exception("Unexpected error processing request %s", request.id, extra={"request_id": request.id})
                 request.status = Status.FAILED
                 request.reason = "internal_error"
             finally:

@@ -6,6 +6,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    log_level: str = "INFO"
+
     provider_base_url: str = "http://localhost:3001"
     # The challenge's public test key: the given docker-compose passes no environment to the app
     provider_api_key: str = "test-dev-2026"

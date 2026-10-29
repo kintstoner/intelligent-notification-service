@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from api.routes_requests import router as requests_router
 from config import settings
+from infra.json_logging import configure_logging
 from infra.repository import InMemoryRequestRepository
 from services.extractor import Extractor
 from services.notifier import DeliveryQueue, Notifier, RateLimiter
@@ -15,6 +16,7 @@ from services.processor import RequestProcessor
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    configure_logging(settings.log_level)
     # One connection pool for both provider endpoints, shared by every worker
     client = httpx.AsyncClient(
         base_url=settings.provider_base_url,
@@ -39,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.repository = InMemoryRequestRepository()
     app.state.pipeline = pipeline
+    app.state.delivery = delivery
     delivery.start()
     pipeline.start()
     yield
@@ -49,3 +52,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Notification Service (Technical Test)", lifespan=lifespan)
 app.include_router(requests_router)
+
+
+@app.get("/health", tags=["operations"])
+def health() -> dict:
+    """Liveness plus the backlog of each stage: how many requests wait for the AI and how many for the provider."""
+    return {
+        "status": "ok",
+        "awaiting_ai": app.state.pipeline.backlog,
+        "awaiting_delivery": app.state.delivery.backlog,
+    }
