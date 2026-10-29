@@ -24,8 +24,9 @@ class Settings(BaseSettings):
     extraction_cache_enabled: bool = False
 
     notify_timeout_s: float = 5.0
-    # The provider allows 50 calls per sliding 10 s window; staying under 5/s avoids provoking 429s
-    notify_rate_per_s: float = 4.5
+    # The provider allows 50 calls in any sliding 10 s window; 45 leaves room for the time calls take to arrive
+    notify_window_max_calls: int = 45
+    notify_window_s: float = 10.0
     notify_max_attempts: int = 3
     # First backoff between notify attempts; doubles each time, with jitter
     notify_backoff_s: float = 0.5

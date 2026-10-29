@@ -6,7 +6,8 @@ def test_defaults_point_at_the_local_provider_with_conservative_limits():
 
     assert settings.provider_base_url == "http://localhost:3001"
     assert settings.ai_max_retries == 1
-    assert settings.notify_rate_per_s < 5
+    assert settings.notify_window_max_calls < 50
+    assert settings.notify_window_s == 10
     assert settings.extraction_cache_enabled is False
 
 

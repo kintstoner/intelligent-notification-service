@@ -1,5 +1,4 @@
 import asyncio
-import itertools
 import json
 
 import httpx
@@ -26,24 +25,50 @@ class FakeClock:
         self.now += seconds
 
 
-async def test_the_rate_limiter_spaces_calls_evenly():
+async def test_a_burst_within_the_window_limit_goes_out_without_waiting():
     clock = FakeClock()
-    limiter = RateLimiter(rate_per_s=4.5, clock=clock, sleep=clock.sleep)
+    limiter = RateLimiter(max_calls=45, window_s=10, clock=clock, sleep=clock.sleep)
+
+    for _ in range(45):
+        await limiter.acquire()
+
+    assert clock.sleeps == []
+
+
+async def test_the_call_over_the_limit_waits_until_the_oldest_one_leaves_the_window():
+    clock = FakeClock()
+    limiter = RateLimiter(max_calls=45, window_s=10, clock=clock, sleep=clock.sleep)
+    for _ in range(45):
+        await limiter.acquire()
+        clock.now += 0.1
+
+    await limiter.acquire()
+
+    # The first call was at t=0; the 46th may go at t=10
+    assert clock.now == pytest.approx(10)
+
+
+async def test_never_more_calls_than_the_limit_in_any_window():
+    clock = FakeClock()
+    limiter = RateLimiter(max_calls=45, window_s=10, clock=clock, sleep=clock.sleep)
     times = []
 
-    for _ in range(46):
+    for _ in range(300):
         await limiter.acquire()
         times.append(clock.now)
+        clock.now += 0.01
 
-    # The provider allows 50 calls in any 10 s window
-    assert times[-1] - times[0] == pytest.approx(45 / 4.5)
-    assert all(later - earlier == pytest.approx(1 / 4.5) for earlier, later in itertools.pairwise(times))
+    busiest = max(sum(1 for t in times if start <= t < start + 10) for start in times)
+    assert busiest == 45
+    # Never faster than the limit allows: after the first window, at most 45 calls per 10 s
+    assert times[-1] - times[0] >= (300 - 45) / 45 * 10
 
 
 async def test_the_rate_limiter_does_not_wait_after_an_idle_period():
     clock = FakeClock()
-    limiter = RateLimiter(rate_per_s=4.5, clock=clock, sleep=clock.sleep)
-    await limiter.acquire()
+    limiter = RateLimiter(max_calls=45, window_s=10, clock=clock, sleep=clock.sleep)
+    for _ in range(45):
+        await limiter.acquire()
     clock.now += 60
 
     await limiter.acquire()

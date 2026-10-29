@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
@@ -25,24 +26,37 @@ class NotificationFailed(Exception):
 
 class RateLimiter:
     """
-    Spaces calls evenly at no more than rate_per_s, with no bursts. The provider allows 50 calls in any sliding
-    10 s window; bursts would be rejected with 429 even when the average is under 5/s.
+    Mirrors the provider's own rule: at most max_calls in any sliding window of window_s seconds. A burst goes out at
+    once while the window has room, so an idle service sends without delay; once it is full, the next call waits for
+    the oldest one to leave the window. max_calls stays below the provider's 50 to absorb the variation between a
+    call leaving here and reaching the provider.
     """
 
-    def __init__(self, rate_per_s: float, clock: Callable[[], float] = time.monotonic, sleep: Sleep = asyncio.sleep):
-        self._interval = 1 / rate_per_s
+    def __init__(
+        self,
+        max_calls: int,
+        window_s: float,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Sleep = asyncio.sleep,
+    ) -> None:
+        self._max_calls = max_calls
+        self._window_s = window_s
         self._clock = clock
         self._sleep = sleep
-        self._next_slot = 0.0
+        self._calls: deque[float] = deque()
         self._lock = asyncio.Lock()
 
     async def acquire(self) -> None:
         async with self._lock:
             now = self._clock()
-            if self._next_slot > now:
-                await self._sleep(self._next_slot - now)
-                now = self._next_slot
-            self._next_slot = now + self._interval
+            while self._calls and self._calls[0] + self._window_s <= now:
+                self._calls.popleft()
+            if len(self._calls) >= self._max_calls:
+                await self._sleep(self._calls[0] + self._window_s - now)
+                # The wait was for exactly this call to leave the window; comparing times again could miss it by a
+                # rounding error and wait forever
+                self._calls.popleft()
+            self._calls.append(self._clock())
 
 
 class Limiter(Protocol):

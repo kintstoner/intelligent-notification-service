@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     notifier = Notifier(
         client,
-        RateLimiter(settings.notify_rate_per_s),
+        RateLimiter(settings.notify_window_max_calls, settings.notify_window_s),
         timeout_s=settings.notify_timeout_s,
         max_attempts=settings.notify_max_attempts,
         backoff_s=settings.notify_backoff_s,
