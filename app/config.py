@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     # The challenge's public test key: the given docker-compose passes no environment to the app
     provider_api_key: str = "test-dev-2026"
 
-    # Concurrent pipeline workers; each one handles one request at a time
-    workers: int = 50
+    # Concurrent AI extractions; each worker handles one request at a time
+    workers: int = 100
     # Bound on requests waiting to be processed, to protect memory
     queue_max_size: int = 10_000
 
@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # The provider allows 50 calls per sliding 10 s window; staying under 5/s avoids provoking 429s
     notify_rate_per_s: float = 4.5
     notify_max_attempts: int = 3
+    # First backoff between notify attempts; doubles each time, with jitter
+    notify_backoff_s: float = 0.5
+    # Notifications in flight at once; the rate limiter, not this, sets the pace
+    notify_concurrency: int = 10
 
 
 settings = Settings()

@@ -7,13 +7,16 @@ from domain.models import Notification, NotificationRequest, Status
 from services.extractor import ExtractionError
 from services.fallback_extractor import complete
 from services.guardrails import AIRefusal, MalformedOutput, RefusalKind, parse_ai_output
-from services.notifier import NotificationFailed, Notifier
 
 logger = logging.getLogger(__name__)
 
 
 class AIExtractor(Protocol):
     async def extract(self, user_input: str) -> str: ...
+
+
+class Delivery(Protocol):
+    def submit(self, notification: Notification, request: NotificationRequest) -> None: ...
 
 
 class _Retry(Exception):
@@ -32,15 +35,16 @@ class _GiveUp(Exception):
 
 class RequestProcessor:
     """
-    One request, end to end: AI extraction, guardrails, deterministic fallback, validation and notification.
+    Turns one request into a validated notification (AI extraction, guardrails, deterministic fallback, validation)
+    and hands it to delivery, which sends it at the provider's pace and sets the final status.
 
     The AI is asked at most max_ai_attempts times, and again only when that can help: a refusal, an answer cut
     short, a missing message or a network failure. Dirty JSON is never a reason to ask again; the guardrails fix it.
     """
 
-    def __init__(self, extractor: AIExtractor, notifier: Notifier, max_ai_attempts: int, cache_enabled: bool) -> None:
+    def __init__(self, extractor: AIExtractor, delivery: Delivery, max_ai_attempts: int, cache_enabled: bool) -> None:
         self._extractor = extractor
-        self._notifier = notifier
+        self._delivery = delivery
         self._max_ai_attempts = max_ai_attempts
         # Off by default; in production it would act as deduplication of identical requests
         self._cache: dict[str, Notification] | None = {} if cache_enabled else None
@@ -48,19 +52,11 @@ class RequestProcessor:
     async def process(self, request: NotificationRequest) -> None:
         try:
             notification = await self._notification_for(request)
-            await self._notifier.send(notification, request)
-        except (_GiveUp, NotificationFailed) as failure:
+        except _GiveUp as failure:
             self._fail(request, failure.reason)
             return
-        request.status = Status.SENT
-        request.reason = None
-        logger.info(
-            "Request %s sent by %s after %d AI and %d notify attempts",
-            request.id,
-            notification.type,
-            request.ai_attempts,
-            request.notify_attempts,
-        )
+        # Stays processing until delivery reports the outcome
+        self._delivery.submit(notification, request)
 
     async def _notification_for(self, request: NotificationRequest) -> Notification:
         if self._cache is not None and (cached := self._cache.get(request.user_input)):

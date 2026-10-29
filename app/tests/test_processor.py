@@ -2,7 +2,6 @@ import pytest
 
 from domain.models import Notification, NotificationRequest, Status
 from services.extractor import ExtractionError
-from services.notifier import NotificationFailed
 from services.processor import RequestProcessor
 
 CLEAN = '{"to": "juan@example.com", "message": "Tu paquete está en camino", "type": "email"}'
@@ -28,45 +27,41 @@ class ScriptedExtractor:
         return answer
 
 
-class RecordingNotifier:
-    def __init__(self, error=None):
-        self.sent = []
-        self.error = error
+class RecordingDelivery:
+    def __init__(self):
+        self.submitted = []
 
-    async def send(self, notification, request):
-        if self.error:
-            raise self.error
-        self.sent.append(notification)
+    def submit(self, notification, request):
+        self.submitted.append(notification)
 
 
-async def process(*answers, notifier=None, cache=False, user_input=USER_INPUT):
+async def process(*answers, cache=False, user_input=USER_INPUT):
     extractor = ScriptedExtractor(*answers)
-    notifier = notifier or RecordingNotifier()
-    request = NotificationRequest(user_input=user_input)
-    await RequestProcessor(extractor, notifier, max_ai_attempts=2, cache_enabled=cache).process(request)
-    return request, extractor, notifier
+    delivery = RecordingDelivery()
+    request = NotificationRequest(user_input=user_input, status=Status.PROCESSING)
+    await RequestProcessor(extractor, delivery, max_ai_attempts=2, cache_enabled=cache).process(request)
+    return request, extractor, delivery
 
 
-async def test_a_clean_answer_is_sent_with_one_ai_call():
-    request, extractor, notifier = await process(CLEAN)
+async def test_a_clean_answer_is_handed_to_delivery_after_one_ai_call():
+    request, extractor, delivery = await process(CLEAN)
 
-    assert request.status == Status.SENT
-    assert notifier.sent == [EXPECTED]
+    assert request.status == Status.PROCESSING
+    assert delivery.submitted == [EXPECTED]
     assert extractor.calls == 1
 
 
 async def test_dirty_json_is_repaired_without_asking_the_ai_again():
-    request, extractor, _ = await process(FENCED)
+    _, extractor, delivery = await process(FENCED)
 
-    assert request.status == Status.SENT
+    assert delivery.submitted == [EXPECTED]
     assert extractor.calls == 1
 
 
 async def test_a_missing_type_is_recovered_without_asking_the_ai_again():
-    request, extractor, notifier = await process(NO_TYPE)
+    _, extractor, delivery = await process(NO_TYPE)
 
-    assert request.status == Status.SENT
-    assert notifier.sent == [EXPECTED]
+    assert delivery.submitted == [EXPECTED]
     assert extractor.calls == 1
 
 
@@ -75,9 +70,9 @@ async def test_a_missing_type_is_recovered_without_asking_the_ai_again():
     [POLICY_REFUSAL, NO_MESSAGE, '{"to": "juan@example.com", "message": "Tu paq', ExtractionError("t", retryable=True)],
 )
 async def test_one_retry_recovers_from_a_refusal_a_missing_message_a_cut_answer_or_a_timeout(first):
-    request, extractor, _ = await process(first, CLEAN)
+    _, extractor, delivery = await process(first, CLEAN)
 
-    assert request.status == Status.SENT
+    assert delivery.submitted == [EXPECTED]
     assert extractor.calls == 2
 
 
@@ -90,11 +85,11 @@ async def test_one_retry_recovers_from_a_refusal_a_missing_message_a_cut_answer_
     ],
 )
 async def test_never_more_than_one_retry(first, second, reason):
-    request, extractor, notifier = await process(first, second, CLEAN)
+    request, extractor, delivery = await process(first, second, CLEAN)
 
     assert (request.status, request.reason) == (Status.FAILED, reason)
     assert extractor.calls == 2
-    assert notifier.sent == []
+    assert delivery.submitted == []
 
 
 @pytest.mark.parametrize(
@@ -112,12 +107,6 @@ async def test_failures_that_a_retry_cannot_fix_are_not_retried(answer, reason):
     assert extractor.calls == 1
 
 
-async def test_a_notification_the_provider_could_not_take_fails_with_its_reason():
-    request, _, _ = await process(CLEAN, notifier=RecordingNotifier(NotificationFailed("rate_limited")))
-
-    assert (request.status, request.reason) == (Status.FAILED, "rate_limited")
-
-
 async def test_counts_the_ai_attempts_of_each_request():
     request, _, _ = await process(POLICY_REFUSAL, CLEAN)
 
@@ -125,20 +114,19 @@ async def test_counts_the_ai_attempts_of_each_request():
 
 
 async def test_with_the_cache_enabled_an_identical_request_reuses_the_extraction():
-    extractor = ScriptedExtractor(CLEAN)
-    processor = RequestProcessor(extractor, RecordingNotifier(), max_ai_attempts=2, cache_enabled=True)
+    extractor, delivery = ScriptedExtractor(CLEAN), RecordingDelivery()
+    processor = RequestProcessor(extractor, delivery, max_ai_attempts=2, cache_enabled=True)
 
     for _ in range(2):
-        request = NotificationRequest(user_input=USER_INPUT)
-        await processor.process(request)
-        assert request.status == Status.SENT
+        await processor.process(NotificationRequest(user_input=USER_INPUT))
 
+    assert delivery.submitted == [EXPECTED, EXPECTED]
     assert extractor.calls == 1
 
 
 async def test_without_the_cache_every_request_asks_the_ai():
     extractor = ScriptedExtractor(CLEAN, CLEAN)
-    processor = RequestProcessor(extractor, RecordingNotifier(), max_ai_attempts=2, cache_enabled=False)
+    processor = RequestProcessor(extractor, RecordingDelivery(), max_ai_attempts=2, cache_enabled=False)
 
     for _ in range(2):
         await processor.process(NotificationRequest(user_input=USER_INPUT))
