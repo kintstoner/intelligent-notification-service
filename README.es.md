@@ -6,7 +6,7 @@ Servicio FastAPI que convierte una petición en lenguaje natural ("Manda un emai
 notificación: un motor de IA extrae `{to, message, type}`, unos guardrails limpian y validan su respuesta y el
 proveedor de notificaciones la envía. Solución al reto descrito en [CHALLENGE.md](CHALLENGE.md).
 
-**Prueba de carga oficial: 100 % de disponibilidad, 0,66 ms de latencia media en `/process` y ratio de llamadas a la IA
+**Prueba de carga oficial: 100 % de disponibilidad, 0,62 ms de latencia media en `/process` y ratio de llamadas a la IA
 de 1,10** (los tres paneles del scorecard en verde); el 99 % de las peticiones terminó `sent`.
 
 ## Ejecutar
@@ -50,7 +50,7 @@ flowchart LR
     workers -->|system prompt + texto crudo| ai[Motor IA /v1/ai/extract]
     workers --> guard[Guardrails] --> fallback[Fallback] --> valid[Validación]
     valid -->|notificación| q2[[Cola de entrega]]
-    q2 --> limiter[Limitador 4,5/s] --> notify[Proveedor /v1/notify]
+    q2 --> limiter[Limitador 45 cada 10 s] --> notify[Proveedor /v1/notify]
     notify -->|sent / failed| repo
 ```
 
@@ -96,19 +96,20 @@ Resumen en [docs/DECISIONS.es.md](docs/DECISIONS.es.md); cada una tiene su ADR e
 - **Guardrails, fallback, validación**: las 16 formas de respuesta del mock se aprovechan sin otra llamada; el
   destinatario y el canal se pueden recuperar de la petición, el mensaje nunca.
 - **Como mucho un reintento de IA**, solo cuando otra llamada puede ayudar.
-- **Pipeline en dos etapas**: las notificaciones esperan en su propia cola, a 4,5/s espaciadas de forma uniforme (el
-  proveedor admite 50 en cualquier ventana de 10 s), así que los workers de IA nunca esperan detrás del límite.
+- **Pipeline en dos etapas**: las notificaciones esperan en su propia cola, tras un limitador que replica la regla del
+  proveedor (como mucho 45 llamadas en cualquier ventana de 10 s, frente a las 50 del proveedor): una ráfaga sale de
+  golpe mientras la ventana tiene hueco, y los workers de IA nunca esperan detrás del límite.
 - **Caché de extracciones desactivada por defecto**: con cuatro frases repetidas ocultaría el coste real.
 
 ## Cómo se ha probado
 
-**113 tests automáticos** (`pytest`), más `ruff`, en CI en cada push:
+**115 tests automáticos** (`pytest`), más `ruff`, en CI en cada push:
 
 | Área | Tests | Qué cubren |
 |---|---|---|
 | Guardrails | `test_guardrails.py` (39) | El propio generador del proveedor forzado por cada una de sus ramas (16 formas de respuesta × email y SMS), tipos de rechazo, llaves y comillas dentro de los valores, nulls, teléfonos numéricos, sinónimos del tipo, salida irreparable |
 | Política de reintentos | `test_processor.py` (16) | Un reintento solo por rechazos, respuestas cortadas, falta de mensaje y timeouts; sin reintento por JSON sucio, falta de información, clave mala o destinatario inválido; conteo de intentos; caché activada/desactivada |
-| Notificador | `test_notifier.py` (15) | Espaciado uniforme (46 llamadas en 10 s a 4,5/s), reintentos ante 429/5xx/timeouts, motivos al rendirse, sin reintento ante 422, backoff exponencial con jitter, `Retry-After`, estados de entrega, backlog acotado |
+| Notificador | `test_notifier.py` (17) | Ventana deslizante (una ráfaga de 45 sin esperar, la siguiente cuando sale la más antigua de la ventana, nunca más de 45 en 10 s, sin espera tras un periodo inactivo), reintentos ante 429/5xx/timeouts, motivos al rendirse, sin reintento ante 422, backoff exponencial con jitter, `Retry-After`, estados de entrega, backlog acotado |
 | Fallback y validación | `test_fallback_extractor.py`, `test_notification.py` (14) | Los cuatro prompts de k6, nunca inventar el mensaje, números internacionales, coherencia destinatario/canal |
 | Cliente de IA | `test_extractor.py` (7) | System prompt + mensaje user crudo, API key, clasificación de errores |
 | API, pipeline, operación | `test_api.py`, `test_pipeline.py`, `test_end_to_end.py`, `test_observability.py`, `test_config.py` (22) | Códigos del contrato, endpoints ejecutados en el event loop, `/process` idempotente, cola llena, workers concurrentes, el worker sobrevive a un fallo, de la ingesta a `sent` a través de la app real con el proveedor simulado, health, logs JSON |
@@ -127,8 +128,8 @@ diciendo hola" termina `failed` con `missing_information`.
 | Panel | Resultado | Verde si |
 |---|---|---|
 | Disponibilidad | **100 %** (8.247 peticiones, 0 fallidas, 19.243 checks correctos) | ≥ 99 % |
-| Latencia media de `/process` | **0,66 ms** (p95 de todas las peticiones 1,4 ms) | < 400 ms |
-| Llamadas a la IA por `/process` | **1,10** (3.014 / 2.749) | < 1,5 |
+| Latencia media de `/process` | **0,62 ms** (p95 de todas las peticiones 1,3 ms) | < 400 ms |
+| Llamadas a la IA por `/process` | **1,10** (3.021 / 2.749) | < 1,5 |
 
 El panel de "concurrencia máxima" (199 usuarios virtuales) es informativo; su color rojo es el del panel por defecto,
 no un umbral.
@@ -137,13 +138,17 @@ Qué pasó con las 2.749 peticiones, según los logs JSON una vez vacío el back
 
 | Resultado | Peticiones | Detalle |
 |---|---|---|
-| `sent` | **2.721 (99,0 %)** | 2.484 con una llamada a la IA, 237 tras un reintento |
-| `failed: ai_refused` | 28 (1,0 %) | Rechazadas dos veces; el mock rechaza el 10 % de las veces, así que ~1 % de las peticiones recibe dos rechazos |
-| Reintentos de IA | 293 | Todos por rechazos; no se reintentó ninguna respuesta sucia |
-| 429 del proveedor | 5 de 2.726 llamadas de notificación | Justo después de la prueba, mientras los workers de IA vaciaban su backlog: con esa carga en el event loop varía el tiempo entre el hueco del limitador y la llegada de la llamada al proveedor, y algunas ventanas pasaron de 50. Las 5 se entregaron en el siguiente intento |
+| `sent` | **2.725 (99,1 %)** | 2.477 con una llamada a la IA, 248 tras un reintento |
+| `failed: ai_refused` | 24 (0,9 %) | Rechazadas dos veces; el mock rechaza el 10 % de las veces, así que ~1 % de las peticiones recibe dos rechazos |
+| Reintentos de IA | 296 | Todos por rechazos; no se reintentó ninguna respuesta sucia |
+| 429 del proveedor | **0** de 2.725 llamadas de notificación | Todas las notificaciones salieron al primer intento |
 
-El backlog de entrega (unas 2.200 notificaciones cuando la extracción se puso al día, un minuto después de acabar k6)
-tardó unos 8 minutos en vaciarse, al ritmo configurado de 4,5/s.
+El backlog de entrega (unas 2.300 notificaciones cuando la extracción se puso al día, un minuto después de acabar k6)
+tardó unos 9 minutos en vaciarse, a 4,5 por segundo de media (45 cada 10 s).
+
+**Probándolo a mano**, 30 peticiones enviadas a la vez desde el navegador llegan a `sent` con una mediana de 2,8 s, que
+es la latencia de la propia IA; las que necesitaron un reintento de IA tardan unos 5 s. Una primera versión del
+limitador espaciaba cada llamada 0,22 s y daba una mediana de 5,3 s en la misma prueba; por eso se sustituyó (ADR 5).
 
 ## Limitaciones conocidas
 
@@ -151,10 +156,10 @@ tardó unos 8 minutos en vaciarse, al ritmo configurado de 4,5/s.
   (ADR 7).
 - El límite de ritmo es por instancia; con varias instancias haría falta un limitador compartido, porque la cuota del
   proveedor es global (ADR 5).
-- Tras una ráfaga, la entrega se vacía a 4,5/s: unos 8 minutos para el backlog que deja la prueba de carga. No hay
-  edad máxima por notificación.
-- El limitador espacia las llamadas cuando salen, no cuando llegan: con mucha carga en el event loop alguna llamada
-  puede recibir un 429 (5 en la prueba de carga), que absorben los reintentos. Un `NOTIFY_RATE_PER_S` menor da más
+- Tras una ráfaga larga, la entrega se vacía a 4,5/s de media: unos 9 minutos para el backlog que deja la prueba de
+  carga. No hay edad máxima por notificación.
+- El limitador cuenta las llamadas cuando salen, no cuando llegan al proveedor; el margen de 5 (45 frente a 50) cubre
+  esa diferencia, y los reintentos absorben un 429 si llegara a producirse. Un `NOTIFY_WINDOW_MAX_CALLS` menor da más
   margen.
 - El mock ignora el system prompt y extrae mal el mensaje (los primeros 50 caracteres, o el texto tras el último ":",
   así que "cita a las 10:00" se queda en "00"). El servicio envía lo que extrajo la IA; nunca reescribe el mensaje.
@@ -174,7 +179,8 @@ Variables de entorno (ver [.env.example](.env.example) y `app/config.py`):
 | `AI_TIMEOUT_S` | `10` | Timeout por llamada a la IA |
 | `AI_MAX_RETRIES` | `1` | Reintentos de IA por petición |
 | `EXTRACTION_CACHE_ENABLED` | `false` | Reutilizar extracciones de peticiones idénticas |
-| `NOTIFY_RATE_PER_S` | `4.5` | Llamadas de notificación por segundo, espaciadas de forma uniforme |
+| `NOTIFY_WINDOW_MAX_CALLS` | `45` | Llamadas de notificación permitidas en cualquier ventana deslizante (el proveedor admite 50) |
+| `NOTIFY_WINDOW_S` | `10` | Duración de esa ventana, en segundos |
 | `NOTIFY_MAX_ATTEMPTS` | `3` | Intentos por notificación |
 | `NOTIFY_BACKOFF_S` | `0.5` | Primer backoff, que se dobla, con jitter |
 | `NOTIFY_CONCURRENCY` | `10` | Notificaciones en vuelo |

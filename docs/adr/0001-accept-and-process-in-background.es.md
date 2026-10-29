@@ -31,7 +31,7 @@ aplicación.
 
 ## Consecuencias
 
-- `/process` responde en menos de un milisegundo hagan lo que hagan la IA o el proveedor (media en k6: 0,66 ms).
+- `/process` responde en menos de un milisegundo hagan lo que hagan la IA o el proveedor (media en k6: 0,62 ms).
 - Todos los endpoints son `async`: uno síncrono se ejecutaría en el pool de hilos de FastAPI y tocaría las colas de
   asyncio desde otro hilo.
 - El endpoint de estado es como se conoce el resultado; `reason` (campo extra y opcional) dice por qué una petición

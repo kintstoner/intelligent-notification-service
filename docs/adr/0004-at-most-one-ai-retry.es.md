@@ -29,7 +29,7 @@ Como mucho `1 + AI_MAX_RETRIES` llamadas por petición (2 por defecto). Solo se 
 
 ## Consecuencias
 
-- Ratio medido en la prueba de carga oficial: **1,10** (3.014 llamadas a la IA para 2.749 llamadas a `/process`).
+- Ratio medido en la prueba de carga oficial: **1,10** (3.021 llamadas a la IA para 2.749 llamadas a `/process`).
 - Alrededor del 10 % de las respuestas son rechazos; un reintento convierte la mayoría en notificaciones enviadas.
 - Los rechazos se distinguen por su texto, que es una heurística: un texto de "falta información" poco habitual se
   reintentaría una vez, gastando una llamada.

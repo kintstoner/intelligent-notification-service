@@ -31,7 +31,7 @@ application's lifespan.
 
 ## Consequences
 
-- `/process` answers in under a millisecond whatever the AI or the provider do (k6 mean: 0.66 ms).
+- `/process` answers in under a millisecond whatever the AI or the provider do (k6 mean: 0.62 ms).
 - Every endpoint is `async`: a sync endpoint would run in FastAPI's thread pool and touch the asyncio queues from
   another thread.
 - The status endpoint is how callers learn the outcome; `reason` (an extra, optional field) says why a request failed

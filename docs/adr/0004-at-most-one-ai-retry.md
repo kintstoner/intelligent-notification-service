@@ -28,7 +28,7 @@ At most `1 + AI_MAX_RETRIES` calls per request (default 2). A second call is mad
 
 ## Consequences
 
-- Measured ratio in the official load test: **1.10** (3,014 AI calls for 2,749 `/process` calls).
+- Measured ratio in the official load test: **1.10** (3,021 AI calls for 2,749 `/process` calls).
 - About 10 % of answers are refusals; one retry turns most of them into sent notifications.
 - Refusals are told apart by their wording, which is a heuristic: an unusual "missing information" text would be
   retried once, wasting one call.

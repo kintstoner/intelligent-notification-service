@@ -6,7 +6,7 @@ FastAPI service that turns a natural-language request ("Send an email to ana@tes
 notification: an AI engine extracts `{to, message, type}`, guardrails clean and validate its answer, and the
 notification provider sends it. Solution to the challenge described in [CHALLENGE.md](CHALLENGE.md).
 
-**Official load test: 100 % availability, 0.66 ms mean `/process` latency, AI call ratio 1.10** (all three scorecard
+**Official load test: 100 % availability, 0.62 ms mean `/process` latency, AI call ratio 1.10** (all three scorecard
 panels green); 99 % of the requests ended `sent`.
 
 ## Run
@@ -50,7 +50,7 @@ flowchart LR
     workers -->|system prompt + raw input| ai[AI engine /v1/ai/extract]
     workers --> guard[Guardrails] --> fallback[Fallback] --> valid[Validation]
     valid -->|notification| q2[[Delivery queue]]
-    q2 --> limiter[Rate limiter 4.5/s] --> notify[Provider /v1/notify]
+    q2 --> limiter[Rate limiter 45 per 10 s] --> notify[Provider /v1/notify]
     notify -->|sent / failed| repo
 ```
 
@@ -96,19 +96,20 @@ Summary in [docs/DECISIONS.md](docs/DECISIONS.md); each one has an ADR in [docs/
 - **Guardrails, fallback, validation**: every one of the mock's 16 answer shapes becomes usable without a new call;
   the recipient and channel can be recovered from the request, the message never is.
 - **At most one AI retry**, only when another call can help.
-- **Two-stage pipeline**: notifications wait in their own queue, paced at 4.5/s evenly spaced (the provider allows 50
-  per sliding 10 s), so the AI workers never wait behind the rate limit.
+- **Two-stage pipeline**: notifications wait in their own queue, under a limiter that mirrors the provider's rule
+  (at most 45 calls in any 10 s window, against the provider's 50): a burst goes out at once while the window has
+  room, and the AI workers never wait behind the limit.
 - **Extraction cache off by default**: with four repeated sentences it would hide the real cost.
 
 ## How it was tested
 
-**113 automated tests** (`pytest`), plus `ruff`, run in CI on every push:
+**115 automated tests** (`pytest`), plus `ruff`, run in CI on every push:
 
 | Area | Tests | What they cover |
 |---|---|---|
 | Guardrails | `test_guardrails.py` (39) | The provider's own generator forced through each of its branches (16 answer shapes × email and SMS), refusal kinds, braces and quotes inside values, nulls, numeric phones, type synonyms, unrepairable output |
 | Retry policy | `test_processor.py` (16) | One retry only for refusals, cut answers, missing messages and timeouts; no retry for dirty JSON, missing information, bad keys or invalid recipients; attempt counts; cache on/off |
-| Notifier | `test_notifier.py` (15) | Even spacing (46 calls in 10 s at 4.5/s), retries on 429/5xx/timeouts, give-up reasons, no retry on 422, exponential backoff with jitter, `Retry-After`, delivery statuses, bounded backlog |
+| Notifier | `test_notifier.py` (17) | Sliding window (a burst of 45 without waiting, the next one when the oldest leaves the window, never more than 45 in any 10 s, no wait after idle), retries on 429/5xx/timeouts, give-up reasons, no retry on 422, exponential backoff with jitter, `Retry-After`, delivery statuses, bounded backlog |
 | Fallback and validation | `test_fallback_extractor.py`, `test_notification.py` (14) | The four k6 prompts, never inventing the message, international numbers, recipient/channel consistency |
 | AI client | `test_extractor.py` (7) | System prompt + raw user message, API key, error classification |
 | API, pipeline, operations | `test_api.py`, `test_pipeline.py`, `test_end_to_end.py`, `test_observability.py`, `test_config.py` (22) | Contract status codes, endpoints running on the event loop, idempotent `/process`, full queue, concurrent workers, worker survives a bug, intake to `sent` through the real app with a mocked provider, health, JSON logs |
@@ -127,8 +128,8 @@ no test could catch turned out to be dead code and was removed.
 | Panel | Result | Green when |
 |---|---|---|
 | Availability | **100 %** (8,247 requests, 0 failed, 19,243 checks passed) | ≥ 99 % |
-| Mean `/process` latency | **0.66 ms** (p95 of all requests 1.4 ms) | < 400 ms |
-| AI calls per `/process` | **1.10** (3,014 / 2,749) | < 1.5 |
+| Mean `/process` latency | **0.62 ms** (p95 of all requests 1.3 ms) | < 400 ms |
+| AI calls per `/process` | **1.10** (3,021 / 2,749) | < 1.5 |
 
 The "max concurrency" panel (199 virtual users) is informational; its red colour is the panel's default, not a
 threshold.
@@ -137,23 +138,27 @@ What happened to the 2,749 requests, from the JSON logs once the delivery backlo
 
 | Outcome | Requests | Detail |
 |---|---|---|
-| `sent` | **2,721 (99.0 %)** | 2,484 with one AI call, 237 after one retry |
-| `failed: ai_refused` | 28 (1.0 %) | Refused twice; the mock refuses 10 % of the time, so about 1 % of requests get two refusals |
-| AI retries | 293 | All of them for refusals; no dirty answer was retried |
-| Provider 429s | 5 of 2,726 notify calls | Right after the test, while the AI workers were clearing their backlog: under that event-loop load the gap between a rate-limiter slot and the call reaching the provider varies, and a few windows went over 50. All 5 were delivered on the next attempt |
+| `sent` | **2,725 (99.1 %)** | 2,477 with one AI call, 248 after one retry |
+| `failed: ai_refused` | 24 (0.9 %) | Refused twice; the mock refuses 10 % of the time, so about 1 % of requests get two refusals |
+| AI retries | 296 | All of them for refusals; no dirty answer was retried |
+| Provider 429s | **0** of 2,725 notify calls | Every notification went out on its first attempt |
 
-The delivery backlog (about 2,200 notifications once extraction had caught up, a minute after k6 finished) took
-about 8 minutes to drain, at the configured 4.5/s.
+The delivery backlog (about 2,300 notifications once extraction had caught up, a minute after k6 finished) took
+about 9 minutes to drain, at 4.5 per second on average (45 per 10 s).
+
+**Testing by hand**, 30 requests sent at once from the browser reach `sent` with a median of 2.8 s, which is the AI's
+own latency; the ones that needed an AI retry take about 5 s. A first version of the rate limiter spaced every call
+0.22 s apart and gave a median of 5.3 s for the same test, which is why it was replaced (ADR 5).
 
 ## Known limitations
 
 - State and queues live in memory, in one process: a restart loses queued and undelivered requests (ADR 7).
 - The rate limit is per instance; several instances would need a shared limiter, since the provider's quota is
   global (ADR 5).
-- After a burst, delivery drains at 4.5/s: about 8 minutes for the backlog the load test leaves. There is no
-  maximum age per notification.
-- The rate limiter spaces calls when they leave, not when they arrive: under heavy event-loop load a few calls can
-  still get a 429 (5 in the load test), which the retries absorb. A lower `NOTIFY_RATE_PER_S` gives more margin.
+- After a long burst, delivery drains at 4.5/s on average: about 9 minutes for the backlog the load test leaves.
+  There is no maximum age per notification.
+- The limiter counts calls when they leave, not when they reach the provider; the margin of 5 (45 against 50) covers
+  that gap, and the retries absorb a 429 if it ever happens. A lower `NOTIFY_WINDOW_MAX_CALLS` gives more margin.
 - The mock ignores the system prompt and extracts the message poorly (the first 50 characters, or the text after the
   last ":", so "cita a las 10:00" becomes "00"). The service forwards what the AI extracted; it never rewrites the
   message.
@@ -173,7 +178,8 @@ Environment variables (see [.env.example](.env.example) and `app/config.py`):
 | `AI_TIMEOUT_S` | `10` | Timeout per AI call |
 | `AI_MAX_RETRIES` | `1` | AI retries per request |
 | `EXTRACTION_CACHE_ENABLED` | `false` | Reuse extractions of identical requests |
-| `NOTIFY_RATE_PER_S` | `4.5` | Notify calls per second, evenly spaced |
+| `NOTIFY_WINDOW_MAX_CALLS` | `45` | Notify calls allowed in any sliding window (the provider allows 50) |
+| `NOTIFY_WINDOW_S` | `10` | Length of that window, in seconds |
 | `NOTIFY_MAX_ATTEMPTS` | `3` | Attempts per notification |
 | `NOTIFY_BACKOFF_S` | `0.5` | First backoff, doubling, with jitter |
 | `NOTIFY_CONCURRENCY` | `10` | Notifications in flight |
